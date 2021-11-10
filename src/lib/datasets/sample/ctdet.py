@@ -26,6 +26,13 @@ class CTDetDataset(data.Dataset):
         i *= 2
     return border // i
 
+  def _convert_alpha(self, alpha):  #alphaは-180,180の間
+      if alpha > 180 or alpha < -180:
+          print('warning bad alpha', alpha)
+      alpha = math.radians(alpha)
+      # alphaは-pi,piの間
+      return alpha
+
   def __getitem__(self, index):
     img_id = self.images[index]
     file_name = self.coco.loadImgs(ids=[img_id])[0]['file_name']
@@ -49,7 +56,11 @@ class CTDetDataset(data.Dataset):
     flipped = False
     if self.split == 'train':
       if not self.opt.not_rand_crop:
-        s = s * np.random.choice(np.arange(0.6, 1.4, 0.1))
+        if 'Endzone' in anns[0]['video']:
+          this_scale = np.random.choice(np.arange(0.3, 1.4, 0.1))
+        else:
+          this_scale = np.random.choice(np.arange(0.6, 1.4, 0.1))
+        s = s * this_scale
         w_border = self._get_border(128, img.shape[1])
         h_border = self._get_border(128, img.shape[0])
         c[0] = np.random.randint(low=w_border, high=img.shape[1] - w_border)
@@ -59,19 +70,28 @@ class CTDetDataset(data.Dataset):
         cf = self.opt.shift
         c[0] += s * np.clip(np.random.randn()*cf, -2*cf, 2*cf)
         c[1] += s * np.clip(np.random.randn()*cf, -2*cf, 2*cf)
-        s = s * np.clip(np.random.randn()*sf + 1, 1 - sf, 1 + sf)
+        this_scale = np.clip(np.random.randn()*sf + 1, 1 - sf, 1 + sf)
+        s = s * this_scale
       
       if np.random.random() < self.opt.flip:
         flipped = True
         img = img[:, ::-1, :]
         c[0] =  width - c[0] - 1
-        
 
-    trans_input = get_affine_transform(
-      c, s, 0, [input_w, input_h])
+    trans_input = get_affine_transform(c, s, 0, [input_w, input_h])
+
+    pr_debug = False
+    if pr_debug:
+        pid = os.getpid()
+        cv2.imwrite(f'/home/tito/tmp/img_a{pid}.png',img.copy())
     inp = cv2.warpAffine(img, trans_input, 
                          (input_w, input_h),
                          flags=cv2.INTER_LINEAR)
+    if pr_debug:
+        print(f'{pid}, s:{s},c:{c},size:{input_w, input_h}')
+        cv2.imwrite(f'/home/tito/tmp/img_b{pid}.png',inp)
+        cv2.imwrite(f'/home/tito/tmp/img_c{pid}.png',img.copy())
+        aaa
     inp = (inp.astype(np.float32) / 255.)
     if self.split == 'train' and not self.opt.no_color_aug:
       color_aug(self._data_rng, inp, self._eig_val, self._eig_vec)
@@ -91,6 +111,14 @@ class CTDetDataset(data.Dataset):
     reg_mask = np.zeros((self.max_objs), dtype=np.uint8)
     cat_spec_wh = np.zeros((self.max_objs, num_classes * 2), dtype=np.float32)
     cat_spec_mask = np.zeros((self.max_objs, num_classes * 2), dtype=np.uint8)
+    rotbin = np.zeros((self.max_objs, 2), dtype=np.int64)
+    rotres = np.zeros((self.max_objs, 2), dtype=np.float32)
+    rot_mask = np.zeros((self.max_objs), dtype=np.uint8)
+    param_s = np.zeros((self.max_objs, 1), dtype=np.float32)
+    param_a = np.zeros((self.max_objs, 1), dtype=np.float32)
+    param_dis = np.zeros((self.max_objs, 1), dtype=np.float32)
+    param_xdiff = np.zeros((self.max_objs, 1), dtype=np.float32)
+    param_ydiff = np.zeros((self.max_objs, 1), dtype=np.float32)
     
     draw_gaussian = draw_msra_gaussian if self.opt.mse_loss else \
                     draw_umich_gaussian
@@ -98,6 +126,9 @@ class CTDetDataset(data.Dataset):
     gt_det = []
     for k in range(num_objs):
       ann = anns[k]
+      if 'alpha' not in ann:
+          for f in ['xdiff', 'ydiff','s','a','dis','alpha']:
+              ann[f] = 0.0
       bbox = self._coco_box_to_bbox(ann['bbox'])
       cls_id = int(self.cat_ids[ann['category_id']])
       if flipped:
@@ -126,7 +157,34 @@ class CTDetDataset(data.Dataset):
         gt_det.append([ct[0] - w / 2, ct[1] - h / 2, 
                        ct[0] + w / 2, ct[1] + h / 2, 1, cls_id])
     
-    ret = {'input': inp, 'hm': hm, 'reg_mask': reg_mask, 'ind': ind, 'wh': wh}
+        if flipped:
+          alpha = 180 - ann['alpha']
+          if alpha > 180:
+              alpha -= 360
+          alpha = self._convert_alpha(alpha)
+          param_xdiff[k] = -ann['xdiff']
+          param_ydiff[k] = ann['ydiff']
+        else:
+          alpha = self._convert_alpha(ann['alpha'])
+          param_xdiff[k] = ann['xdiff']
+          param_ydiff[k] = ann['ydiff']
+        #print(ann['video_frame'],ann['label'],ann['alpha'])
+        # print('img_id cls_id alpha rot_y', img_path, cls_id, alpha, ann['rotation_y'])
+        if alpha < np.pi / 6. or alpha > 5 * np.pi / 6.:
+          rotbin[k, 0] = 1
+          rotres[k, 0] = alpha - (-0.5 * np.pi)
+        if alpha > -np.pi / 6. or alpha < -5 * np.pi / 6.:
+          rotbin[k, 1] = 1
+          rotres[k, 1] = alpha - (0.5 * np.pi)
+        rot_mask[k] = 1
+        param_s[k] = ann['s']
+        param_a[k] = ann['a']
+        param_dis[k] = ann['dis']
+
+    ret = {'input': inp, 'hm': hm, 'reg_mask': reg_mask, 'ind': ind, 'wh': wh, 
+            'rotbin': rotbin, 'rotres': rotres, 'rot_mask': rot_mask, 
+            'param_s': param_s, 'param_a': param_a, 'param_dis': param_dis,
+            'param_xdiff': param_xdiff, 'param_ydiff': param_ydiff}
     if self.opt.dense_wh:
       hm_a = hm.max(axis=0, keepdims=True)
       dense_wh_mask = np.concatenate([hm_a, hm_a], axis=0)

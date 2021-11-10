@@ -461,6 +461,65 @@ def ddd_decode(heat, rot, depth, dim, wh=None, reg=None, K=40):
       
     return detections
 
+#opt.heads = 'hm': opt.num_classes, 
+#'wh': 2 if not opt.cat_spec_wh else 2 * opt.num_classes
+#'rot': 8,
+#'param_xdiff': 1,
+#'param_ydiff': 1,
+#'param_s': 1,
+#'param_a': 1,
+#'param_dis': 1,
+def nfl_decode(heat, wh, rot, xdiff, ydiff, prms, prma, prmdis, reg=None, cat_spec_wh=False, K=100):
+    batch, cat, height, width = heat.size()
+
+    # heat = torch.sigmoid(heat)
+    # perform nms on heatmaps
+    heat = _nms(heat)
+      
+    scores, inds, clses, ys, xs = _topk(heat, K=K)
+    if reg is not None:
+      reg = _transpose_and_gather_feat(reg, inds)
+      reg = reg.view(batch, K, 2)
+      xs = xs.view(batch, K, 1) + reg[:, :, 0:1]
+      ys = ys.view(batch, K, 1) + reg[:, :, 1:2]
+    else:
+      xs = xs.view(batch, K, 1) + 0.5
+      ys = ys.view(batch, K, 1) + 0.5
+    wh = _transpose_and_gather_feat(wh, inds)
+    if cat_spec_wh:
+      wh = wh.view(batch, K, cat, 2)
+      clses_ind = clses.view(batch, K, 1, 1).expand(batch, K, 1, 2).long()
+      wh = wh.gather(2, clses_ind).view(batch, K, 2)
+    else:
+      wh = wh.view(batch, K, 2)
+    clses  = clses.view(batch, K, 1).float()
+    scores = scores.view(batch, K, 1)
+    bboxes = torch.cat([xs - wh[..., 0:1] / 2, 
+                        ys - wh[..., 1:2] / 2,
+                        xs + wh[..., 0:1] / 2, 
+                        ys + wh[..., 1:2] / 2], dim=2)
+    rot = _transpose_and_gather_feat(rot, inds)
+    rot = rot.view(batch, K, 8)
+
+    xdiff = _transpose_and_gather_feat(xdiff, inds)
+    xdiff = xdiff.view(batch, K, 1)
+
+    ydiff = _transpose_and_gather_feat(ydiff, inds)
+    ydiff = ydiff.view(batch, K, 1)
+
+    prms = _transpose_and_gather_feat(prms, inds)
+    prms = prms.view(batch, K, 1)
+
+    prma = _transpose_and_gather_feat(prma, inds)
+    prma = prma.view(batch, K, 1)
+
+    prmdis = _transpose_and_gather_feat(prmdis, inds)
+    prmdis = prmdis.view(batch, K, 1)
+
+    detections = torch.cat([bboxes, scores, rot, xdiff, ydiff, prms, prma, prmdis, clses], dim=2)
+      
+    return detections
+
 def ctdet_decode(heat, wh, reg=None, cat_spec_wh=False, K=100):
     batch, cat, height, width = heat.size()
 

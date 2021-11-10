@@ -428,6 +428,7 @@ class DLASeg(nn.Module):
     def __init__(self, base_name, heads, pretrained, down_ratio, final_kernel,
                  last_level, head_conv, out_channel=0):
         super(DLASeg, self).__init__()
+        #import pdb;pdb.set_trace()
         assert down_ratio in [2, 4, 8, 16]
         self.first_level = int(np.log2(down_ratio))
         self.last_level = last_level
@@ -439,7 +440,8 @@ class DLASeg(nn.Module):
         if out_channel == 0:
             out_channel = channels[self.first_level]
 
-        self.ida_up = IDAUp(out_channel, channels[self.first_level:self.last_level], 
+        self.ida_up = IDAUp(out_channel, 
+                            channels[self.first_level:self.last_level], 
                             [2 ** i for i in range(self.last_level - self.first_level)])
         
         self.heads = heads
@@ -447,8 +449,7 @@ class DLASeg(nn.Module):
             classes = self.heads[head]
             if head_conv > 0:
               fc = nn.Sequential(
-                  nn.Conv2d(channels[self.first_level], head_conv,
-                    kernel_size=3, padding=1, bias=True),
+                  nn.Conv2d(channels[self.first_level], head_conv, kernel_size=3, padding=1, bias=True),
                   nn.ReLU(inplace=True),
                   nn.Conv2d(head_conv, classes, 
                     kernel_size=final_kernel, stride=1, 
@@ -468,13 +469,29 @@ class DLASeg(nn.Module):
             self.__setattr__(head, fc)
 
     def forward(self, x):
+        #import pdb;pdb.set_trace()
+                                                                #torch.Size([2, 3, 736, 1312])
         x = self.base(x)
-        x = self.dla_up(x)
+                                                                #x0 torch.Size([2, 32, 368, 656])
+                                                                #x1 torch.Size([2, 64, 184, 328])
+                                                                #x2 torch.Size([2, 128, 92, 164])
+                                                                #x3 torch.Size([2, 256, 46, 82])
+                                                                #x4 torch.Size([2, 512, 23, 41])
+        x = self.dla_up(x)                                      
+                                                                #x0 torch.Size([2, 64, 184, 328])
+                                                                #x1 torch.Size([2, 128, 92, 164])
+                                                                #x2 torch.Size([2, 256, 46, 82])
+                                                                #x3 torch.Size([2, 512, 23, 41])
 
         y = []
+                                                                #self.first_level 2
+                                                                #self.last_level  5
         for i in range(self.last_level - self.first_level):
             y.append(x[i].clone())
         self.ida_up(y, 0, len(y))
+                                                                #y0 torch.Size([2, 64, 184, 328])
+                                                                #y1 torch.Size([2, 64, 184, 328])
+                                                                #y2 torch.Size([2, 64, 184, 328])
 
         z = {}
         for head in self.heads:

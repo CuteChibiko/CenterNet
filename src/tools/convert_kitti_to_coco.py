@@ -77,6 +77,7 @@ for SPLIT in SPLITS:
     image_set = open(image_set_path + '{}.txt'.format(split), 'r')
     image_to_id = {}
     for line in image_set:
+      # 画像ごとのループ
       if line[-1] == '\n':
         line = line[:-1]
       image_id = int(line)
@@ -94,6 +95,11 @@ for SPLIT in SPLITS:
       anns = open(ann_path, 'r')
       
       if DEBUG:
+        if not os.path.exists(DATA_PATH + 'images/trainval/' + image_info['file_name']):
+            print(DATA_PATH + 'images/trainval/' + image_info['file_name'], 'not found')
+        else:
+            print(DATA_PATH + 'images/trainval/' + image_info['file_name'])
+
         image = cv2.imread(
           DATA_PATH + 'images/trainval/' + image_info['file_name'])
 
@@ -123,7 +129,9 @@ for SPLIT in SPLITS:
         if DEBUG and tmp[0] != 'DontCare':
           box_3d = compute_box_3d(dim, location, rotation_y)
           box_2d = project_to_image(box_3d, calib)
-          # print('box_2d', box_2d)
+          print('box_2d')
+          print(bbox)
+          print(box_2d)
           image = draw_box_3d(image, box_2d)
           x = (bbox[0] + bbox[2]) / 2
           '''
@@ -139,9 +147,9 @@ for SPLIT in SPLITS:
           pt_3d[1] += dim[0] / 2
           print('pt_3d', pt_3d)
           print('location', location)
-      if DEBUG:
-        cv2.imshow('image', image)
-        cv2.waitKey()
+      #if DEBUG:
+      #  cv2.imshow('image', image)
+      #  cv2.waitKey()
 
 
     print("# images: ", len(ret['images']))

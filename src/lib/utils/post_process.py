@@ -27,8 +27,7 @@ def ddd_post_process_2d(dets, c, s, opt):
   include_wh = dets.shape[2] > 16
   for i in range(dets.shape[0]):
     top_preds = {}
-    dets[i, :, :2] = transform_preds(
-          dets[i, :, 0:2], c[i], s[i], (opt.output_w, opt.output_h))
+    dets[i, :, :2] = transform_preds(dets[i, :, 0:2], c[i], s[i], (opt.output_w, opt.output_h))
     classes = dets[i, :, -1]
     for j in range(opt.num_classes):
       inds = (classes == j)
@@ -40,9 +39,7 @@ def ddd_post_process_2d(dets, c, s, opt):
       if include_wh:
         top_preds[j + 1] = np.concatenate([
           top_preds[j + 1],
-          transform_preds(
-            dets[i, inds, 15:17], c[i], s[i], (opt.output_w, opt.output_h))
-          .astype(np.float32)], axis=1)
+          transform_preds(dets[i, inds, 15:17], c[i], s[i], (opt.output_w, opt.output_h)).astype(np.float32)], axis=1)
     ret.append(top_preds)
   return ret
 
@@ -84,12 +81,38 @@ def ctdet_post_process(dets, c, s, h, w, num_classes):
   # dets: batch x max_dets x dim
   # return 1-based class det dict
   ret = []
+  #import pdb;pdb.set_trace()
   for i in range(dets.shape[0]):
     top_preds = {}
-    dets[i, :, :2] = transform_preds(
-          dets[i, :, 0:2], c[i], s[i], (w, h))
-    dets[i, :, 2:4] = transform_preds(
-          dets[i, :, 2:4], c[i], s[i], (w, h))
+    dets[i, :, :2] = transform_preds( dets[i, :, 0:2], c[i], s[i], (w, h))
+    dets[i, :, 2:4] = transform_preds( dets[i, :, 2:4], c[i], s[i], (w, h))
+    classes = dets[i, :, -1]
+    for j in range(num_classes):
+      inds = (classes == j)
+      # bboxes, scores, rot, xdiff, ydiff, prms, prma, prmdis, clses
+      top_preds[j + 1] = np.concatenate([
+        dets[i, inds, :4].astype(np.float32),
+        dets[i, inds, 4:5].astype(np.float32), 
+        get_alpha(dets[i, inds, 5:13])[:, np.newaxis].astype(np.float32),
+        dets[i, inds, 13:14].astype(np.float32),
+        dets[i, inds, 14:15].astype(np.float32),
+        dets[i, inds, 15:16].astype(np.float32),
+        dets[i, inds, 16:17].astype(np.float32),
+        dets[i, inds, 17:18].astype(np.float32),
+        ], axis=1).tolist()
+    ret.append(top_preds)
+  return ret
+
+
+def _ctdet_post_process(dets, c, s, h, w, num_classes):
+  # dets: batch x max_dets x dim
+  # return 1-based class det dict
+  ret = []
+  #import pdb;pdb.set_trace()
+  for i in range(dets.shape[0]):
+    top_preds = {}
+    dets[i, :, :2] = transform_preds( dets[i, :, 0:2], c[i], s[i], (w, h))
+    dets[i, :, 2:4] = transform_preds( dets[i, :, 2:4], c[i], s[i], (w, h))
     classes = dets[i, :, -1]
     for j in range(num_classes):
       inds = (classes == j)

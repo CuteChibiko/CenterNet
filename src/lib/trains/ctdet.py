@@ -5,7 +5,7 @@ from __future__ import print_function
 import torch
 import numpy as np
 
-from models.losses import FocalLoss
+from models.losses import FocalLoss, L1Loss, BinRotLoss
 from models.losses import RegL1Loss, RegLoss, NormRegL1Loss, RegWeightedL1Loss
 from models.decode import ctdet_decode
 from models.utils import _sigmoid
@@ -20,6 +20,7 @@ class CtdetLoss(torch.nn.Module):
     self.crit = torch.nn.MSELoss() if opt.mse_loss else FocalLoss()
     self.crit_reg = RegL1Loss() if opt.reg_loss == 'l1' else \
               RegLoss() if opt.reg_loss == 'sl1' else None
+    self.crit_rot = BinRotLoss()
     self.crit_wh = torch.nn.L1Loss(reduction='sum') if opt.dense_wh else \
               NormRegL1Loss() if opt.norm_wh else \
               RegWeightedL1Loss() if opt.cat_spec_wh else self.crit_reg
@@ -28,6 +29,7 @@ class CtdetLoss(torch.nn.Module):
   def forward(self, outputs, batch):
     opt = self.opt
     hm_loss, wh_loss, off_loss = 0, 0, 0
+    rot_loss, param_xdiff_loss, param_ydiff_loss, param_s_loss, param_a_loss, param_dis_loss = 0, 0, 0, 0, 0, 0
     for s in range(opt.num_stacks):
       output = outputs[s]
       if not opt.mse_loss:
@@ -46,31 +48,58 @@ class CtdetLoss(torch.nn.Module):
           batch['ind'].detach().cpu().numpy(), 
           output['reg'].shape[3], output['reg'].shape[2])).to(opt.device)
 
+      #import pdb;pdb.set_trace()
       hm_loss += self.crit(output['hm'], batch['hm']) / opt.num_stacks
       if opt.wh_weight > 0:
         if opt.dense_wh:
           mask_weight = batch['dense_wh_mask'].sum() + 1e-4
-          wh_loss += (
-            self.crit_wh(output['wh'] * batch['dense_wh_mask'],
-            batch['dense_wh'] * batch['dense_wh_mask']) / 
+          wh_loss += ( self.crit_wh(output['wh'] * batch['dense_wh_mask'], batch['dense_wh'] * batch['dense_wh_mask']) / 
             mask_weight) / opt.num_stacks
         elif opt.cat_spec_wh:
-          wh_loss += self.crit_wh(
-            output['wh'], batch['cat_spec_mask'],
-            batch['ind'], batch['cat_spec_wh']) / opt.num_stacks
+          wh_loss += self.crit_wh( output['wh'], batch['cat_spec_mask'], batch['ind'], batch['cat_spec_wh']) / opt.num_stacks
         else:
-          wh_loss += self.crit_reg(
-            output['wh'], batch['reg_mask'],
-            batch['ind'], batch['wh']) / opt.num_stacks
+          wh_loss += self.crit_reg( output['wh'], batch['reg_mask'], batch['ind'], batch['wh']) / opt.num_stacks
       
       if opt.reg_offset and opt.off_weight > 0:
-        off_loss += self.crit_reg(output['reg'], batch['reg_mask'],
-                             batch['ind'], batch['reg']) / opt.num_stacks
-        
+        off_loss += self.crit_reg(output['reg'], batch['reg_mask'], batch['ind'], batch['reg']) / opt.num_stacks
+
+      # added
+      if opt.rot_weight > 0:
+        rot_loss += self.crit_rot(output['rot'], batch['rot_mask'], batch['ind'], batch['rotbin'], batch['rotres']) / opt.num_stacks
+      
+      if opt.param_xdiff_weight > 0:
+        param_xdiff_loss += self.crit_reg(output['param_xdiff'], batch['reg_mask'], batch['ind'], batch['param_xdiff']) / opt.num_stacks
+
+      if opt.param_ydiff_weight > 0:
+        param_ydiff_loss += self.crit_reg(output['param_ydiff'], batch['reg_mask'], batch['ind'], batch['param_ydiff']) / opt.num_stacks
+
+      if opt.param_s_weight > 0:
+        param_s_loss += self.crit_reg(output['param_s'], batch['reg_mask'], batch['ind'], batch['param_s']) / opt.num_stacks
+
+      if opt.param_a_weight > 0:
+        param_a_loss += self.crit_reg(output['param_a'], batch['reg_mask'], batch['ind'], batch['param_a']) / opt.num_stacks
+
+      if opt.param_dis_weight > 0:
+        param_dis_loss += self.crit_reg(output['param_dis'], batch['reg_mask'], batch['ind'], batch['param_dis']) / opt.num_stacks
+
     loss = opt.hm_weight * hm_loss + opt.wh_weight * wh_loss + \
-           opt.off_weight * off_loss
+           opt.off_weight * off_loss + \
+           rot_loss * opt.rot_weight + param_xdiff_loss * opt.param_xdiff_weight + param_ydiff_loss * opt.param_ydiff_weight + param_s_loss * opt.param_s_weight + param_a_loss * opt.param_a_weight + param_dis_loss * opt.param_dis_weight
     loss_stats = {'loss': loss, 'hm_loss': hm_loss,
-                  'wh_loss': wh_loss, 'off_loss': off_loss}
+                  'wh_loss': wh_loss, 'off_loss': off_loss
+                 }
+    if opt.rot_weight > 0:
+      loss_stats['rot'] = rot_loss
+    if opt.param_xdiff_weight > 0:
+      loss_stats['xdiff'] = param_xdiff_loss
+    if opt.param_ydiff_weight > 0:
+      loss_stats['ydiff'] = param_ydiff_loss
+    if opt.param_s_weight > 0:
+      loss_stats['s'] = param_s_loss
+    if opt.param_a_weight > 0:
+      loss_stats['a'] = param_a_loss
+    if opt.param_dis_weight > 0:
+      loss_stats['dis'] = param_dis_loss
     return loss, loss_stats
 
 class CtdetTrainer(BaseTrainer):
@@ -79,6 +108,32 @@ class CtdetTrainer(BaseTrainer):
   
   def _get_losses(self, opt):
     loss_states = ['loss', 'hm_loss', 'wh_loss', 'off_loss']
+    '''
+    if opt.rot_weight > 0:
+      loss_stats['rot'] = rot_loss
+    if opt.param_xdiff_weight > 0:
+      loss_stats['xdiff'] = param_xdiff_loss
+    if opt.param_ydiff_weight > 0:
+      loss_stats['ydiff'] = param_ydiff_loss
+    if opt.param_s_weight > 0:
+      loss_stats['s'] = param_s_loss
+    if opt.param_a_weight > 0:
+      loss_stats['a'] = param_a_loss
+    if opt.param_dis_weight > 0:
+      loss_stats['dis'] = param_dis_loss
+    '''
+    if opt.rot_weight > 0:
+      loss_states.append('rot')
+    if opt.param_xdiff_weight > 0:
+      loss_states.append('xdiff')
+    if opt.param_ydiff_weight > 0:
+      loss_states.append('ydiff')
+    if opt.param_s_weight > 0:
+      loss_states.append('s')
+    if opt.param_a_weight > 0:
+      loss_states.append('a')
+    if opt.param_dis_weight > 0:
+      loss_states.append('dis')
     loss = CtdetLoss(opt)
     return loss_states, loss
 

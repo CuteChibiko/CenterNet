@@ -13,7 +13,7 @@ try:
 except:
   print('NMS not imported! If you need it,'
         ' do \n cd $CenterNet_ROOT/src/lib/external \n make')
-from models.decode import ctdet_decode
+from models.decode import ctdet_decode, nfl_decode
 from models.utils import flip_tensor
 from utils.image import get_affine_transform
 from utils.post_process import ctdet_post_process
@@ -31,13 +31,33 @@ class CtdetDetector(BaseDetector):
       hm = output['hm'].sigmoid_()
       wh = output['wh']
       reg = output['reg'] if self.opt.reg_offset else None
+      rot = output['rot']
+      param_xdiff = output['param_xdiff']
+      param_ydiff = output['param_ydiff']
+      param_s = output['param_s']
+      param_a = output['param_a']
+      param_dis = output['param_dis']
+      #import pdb;pdb.set_trace()
       if self.opt.flip_test:
         hm = (hm[0:1] + flip_tensor(hm[1:2])) / 2
         wh = (wh[0:1] + flip_tensor(wh[1:2])) / 2
         reg = reg[0:1] if reg is not None else None
+        rot = rot[0:1]
+        param_xdiff = param_xdiff[0:1]
+        param_ydiff = (param_ydiff[0:1] + flip_tensor(param_ydiff[1:2])) / 2
+        param_s = (param_s[0:1] + flip_tensor(param_s[1:2])) / 2
+        param_a = (param_a[0:1] + flip_tensor(param_a[1:2])) / 2
+        param_dis = (param_dis[0:1] + flip_tensor(param_dis[1:2])) / 2
       torch.cuda.synchronize()
       forward_time = time.time()
-      dets = ctdet_decode(hm, wh, reg=reg, cat_spec_wh=self.opt.cat_spec_wh, K=self.opt.K)
+      #dets = ctdet_decode(hm, wh, reg=reg, cat_spec_wh=self.opt.cat_spec_wh, K=self.opt.K)
+      #'rot': 8,
+      #'param_xdiff': 1,
+      #'param_ydiff': 1,
+      #'param_s': 1,
+      #'param_a': 1,
+      #'param_dis': 1,
+      dets = nfl_decode(hm, wh, rot, param_xdiff, param_ydiff, param_s, param_a, param_dis, reg=reg, cat_spec_wh=self.opt.cat_spec_wh, K=self.opt.K)
       
     if return_time:
       return output, dets, forward_time
@@ -50,8 +70,9 @@ class CtdetDetector(BaseDetector):
     dets = ctdet_post_process(
         dets.copy(), [meta['c']], [meta['s']],
         meta['out_height'], meta['out_width'], self.opt.num_classes)
+    #import pdb;pdb.set_trace()
     for j in range(1, self.num_classes + 1):
-      dets[0][j] = np.array(dets[0][j], dtype=np.float32).reshape(-1, 5)
+      dets[0][j] = np.array(dets[0][j], dtype=np.float32).reshape(-1, 11)
       dets[0][j][:, :4] /= scale
     return dets[0]
 

@@ -9,6 +9,10 @@ import sys
 class opts(object):
   def __init__(self):
     self.parser = argparse.ArgumentParser()
+    # additional tito
+    self.parser.add_argument('--split_test', default='default', help='ex. ../../work/coco_additional_images.json')
+    self.parser.add_argument('--split_val', default='default', help='ex. ../../work/coco_additional_images.json')
+    self.parser.add_argument('--split_train', default='default', help='ex. ../../work/coco_additional_images.json')
     # basic experiment setting
     self.parser.add_argument('task', default='ctdet',
                              help='ctdet | ddd | multi_pose | exdet')
@@ -32,6 +36,8 @@ class opts(object):
                                   'Reloaded the optimizer parameter and '
                                   'set load_model to model_last.pth '
                                   'in the exp dir if load_model is empty.') 
+
+    self.parser.add_argument('--out_file_sufix', default='default', help='../exp/ctdet/split-file-SUFIX.json')
 
     # system
     self.parser.add_argument('--gpus', default='0', 
@@ -161,6 +167,14 @@ class opts(object):
                              help='loss weight for keypoint local offsets.')
     self.parser.add_argument('--wh_weight', type=float, default=0.1,
                              help='loss weight for bounding box size.')
+
+    self.parser.add_argument('--param_xdiff_weight', type=float, default=0.1, help='additional loss')
+    self.parser.add_argument('--param_ydiff_weight', type=float, default=0.1, help='additional loss')
+    self.parser.add_argument('--param_s_weight',     type=float, default=0.1, help='additional loss')
+    self.parser.add_argument('--param_a_weight',     type=float, default=0.1, help='additional loss')
+    self.parser.add_argument('--param_dis_weight',   type=float, default=0.1, help='additional loss')
+    self.parser.add_argument('--rot_weight',         type=float, default=0.2,   help='loss weight for orientation.')
+
     # multi_pose
     self.parser.add_argument('--hp_weight', type=float, default=1,
                              help='loss weight for human pose offset.')
@@ -171,8 +185,6 @@ class opts(object):
                              help='loss weight for depth.')
     self.parser.add_argument('--dim_weight', type=float, default=1,
                              help='loss weight for 3d bounding box size.')
-    self.parser.add_argument('--rot_weight', type=float, default=1,
-                             help='loss weight for orientation.')
     self.parser.add_argument('--peak_thresh', type=float, default=0.2)
     
     # task
@@ -313,8 +325,8 @@ class opts(object):
       if opt.reg_offset:
         opt.heads.update({'reg': 2})
     elif opt.task == 'ctdet':
-      # assert opt.dataset in ['pascal', 'coco']
       opt.heads = {'hm': opt.num_classes,
+                   'rot': 8, 'param_xdiff': 1, 'param_ydiff': 1, 'param_s': 1, 'param_a': 1, 'param_dis': 1,
                    'wh': 2 if not opt.cat_spec_wh else 2 * opt.num_classes}
       if opt.reg_offset:
         opt.heads.update({'reg': 2})

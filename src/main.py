@@ -12,7 +12,7 @@ from opts import opts
 from models.model import create_model, load_model, save_model
 from models.data_parallel import DataParallel
 from logger import Logger
-from datasets.dataset_factory import get_dataset
+from lib.datasets.dataset_factory import get_dataset
 from trains.train_factory import train_factory
 
 
@@ -29,7 +29,7 @@ def main(opt):
   opt.device = torch.device('cuda' if opt.gpus[0] >= 0 else 'cpu')
   
   print('Creating model...')
-  model = create_model(opt.arch, opt.heads, opt.head_conv)
+  model = create_model(opt.arch, opt.heads, opt.head_conv, opt.down_ratio)
   optimizer = torch.optim.Adam(model.parameters(), opt.lr)
   start_epoch = 0
   if opt.load_model != '':
